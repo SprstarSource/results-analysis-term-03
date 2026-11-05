@@ -1,108 +1,48 @@
-"Attribute VB_Name = ""modAnalysisWorkbookBuilderData03"""
+Attribute VB_Name = "modAnalysisBuilderData03"
 Option Explicit
 
 '==============================================================================
-" Module  : modAnalysisWorkbookBuilderData03    ""Data"" step)"
-' Purpose : Reads \Source03\ with the SAME embedded collection engine as
-'           ResultFlow02, groups the sections exactly as the Map of ResultFlow02
-'           (12 files from 17 source sheets) and writes the Data and Data01
-'           sheets of each NEW workbook.
-' Notes   : - Pure ASCII: Arabic text = hex code points (see AR).
+' Module  : modAnalysisBuilderData03    ("Data" & "Data01" step)
+' Purpose : Reads \Source03\ with the embedded collection engine,
+'           groups the sections as defined in GetFileMap (12 files from 17
+'           source sheets) and writes the Data and Data01 sheets of each
+'           NEW workbook.
+' Notes   : - Uses shared helpers from modAnalysisBuilderCommon03 (ArT, NormKey,
+'             FileExistsP, FolderExistsP, IsOpenWb).
 '           - The source files are only read: nothing is converted or moved.
-'           - Engine = lines of ResultFlow02 (SortedNames ... end), unchanged
-'             except one block in SrcProcessFile that keeps rows A1:A4 of the
-'             source (identity lines) in cell A1 of each collected sheet.
 '==============================================================================
 
-"Private Const SOURCE_FOLDER_NAME As String = ""Source03"""
+Private Const SOURCE_FOLDER_NAME As String = "Source03"
 
-' ---- Collection engine constants (embedded copy of modCollector - keep identical) ----
+' ---- Collection engine constants ----
 Private Const DATA_START_ROW       As Long = 6      ' header row in the source sheet
-Private Const TRAILING_ROWS_SKIP   As Long = 1      ' footer rows after last used row (original logic: -1). Set 0 if none
+Private Const TRAILING_ROWS_SKIP   As Long = 1      ' footer rows after last used row
 Private Const IDENTITY_LAST_COL    As Long = 5      ' columns A:E = identity columns (AutoFit)
 Private Const COL_WIDTH            As Double = 5.7  ' width for columns F:LastCol
 Private Const FONT_SIZE            As Long = 14
-"Private Const FONT_ARABIC          As String = ""Arabic UI Display Light"""
-"Private Const FONT_NUMERIC         As String = ""Bahnschrift SemiBold"""
-"Private Const FONT_FALLBACK        As String = ""Calibri"""
+Private Const FONT_ARABIC          As String = "Arabic UI Display Light"
+Private Const FONT_NUMERIC         As String = "Bahnschrift SemiBold"
+Private Const FONT_FALLBACK        As String = "Calibri"
 
-"Private Const PREFERRED_FONT As String = ""Cairo"""
-"Private Const FALLBACK_FONT  As String = ""Arial"""
-Private Const HEADER_FONT_SIZE As Double = 11
-Private Const HEADER_ROW_HEIGHT As Double = 30
+Private Const PREFERRED_FONT       As String = "Cairo"
+Private Const FALLBACK_FONT        As String = "Arial"
+Private Const HEADER_FONT_SIZE     As Double = 11
+Private Const HEADER_ROW_HEIGHT    As Double = 30
 
 Private g_ActiveArabicFont  As String
 Private g_ActiveNumericFont As String
 
 ' ==============================================================================
-' HELPERS
+' LOCAL ENGINE HELPERS
 ' ==============================================================================
-
-"' Builds a string from space-separated hex code points, e.g. AR(""0627 0644"")"
-Private Function AR(ByVal codes As String) As String
-    Dim parts() As String, i As Long, s As String
-"    parts = Split(codes, "" "")"
-    For i = LBound(parts) To UBound(parts)
-"        If Len(parts(i)) > 0 Then s = s & ChrW(CLng(""&H"" & parts(i)))"
-    Next i
-    AR = s
-End Function
-
-' Removes invisible differences: NBSP, direction marks, tatweel, double spaces
-Private Function NormalizeKey(ByVal s As String) As String
-    Dim c As Variant
-"    s = Replace(s, ChrW(160), "" "")"
-"    s = Replace(s, vbTab, "" "")"
-"    s = Replace(s, vbCr, "" "")"
-"    s = Replace(s, vbLf, "" "")"
-    For Each c In Array(&H200B, &H200E, &H200F, &H202A, &H202B, &H202C, &H640)
-"        s = Replace(s, ChrW(CLng(c)), """")"
-    Next c
-"    Do While InStr(s, ""  "") > 0: s = Replace(s, ""  "", "" ""): Loop"
-    NormalizeKey = Trim(s)
-End Function
-
 Private Function CellText(ByVal r As Range) As String
-"    If IsError(r.Value) Then CellText = """" Else CellText = CStr(r.Value)"
-End Function
-
-Private Function FileExistsPath(ByVal p As String) As Boolean
-    On Error Resume Next
-    FileExistsPath = ((GetAttr(p) And vbDirectory) = 0)
-    If Err.Number <> 0 Then FileExistsPath = False: Err.Clear
-End Function
-
-Private Function FolderExistsPath(ByVal p As String) As Boolean
-    On Error Resume Next
-    FolderExistsPath = ((GetAttr(p) And vbDirectory) <> 0)
-    If Err.Number <> 0 Then FolderExistsPath = False: Err.Clear
-End Function
-
-Private Function EnsureFolder(ByVal p As String) As Boolean
-"    If Right(p, 1) = ""\"" Then p = Left(p, Len(p) - 1)"
-    If Not FolderExistsPath(p) Then
-        On Error Resume Next
-        MkDir p
-        Err.Clear
-        On Error GoTo 0
-    End If
-    EnsureFolder = FolderExistsPath(p)
-End Function
-
-Private Function IsWorkbookOpen(ByVal fullPath As String) As Boolean
-    Dim wb As Workbook
-    For Each wb In Application.Workbooks
-        If StrComp(wb.FullName, fullPath, vbTextCompare) = 0 Then
-            IsWorkbookOpen = True
-            Exit Function
-        End If
-    Next wb
+    If IsError(r.Value) Then CellText = "" Else CellText = CStr(r.Value)
 End Function
 
 ' Last row containing anything, in any column (0 if the sheet is empty)
 Private Function LastUsedRow(ByVal ws As Worksheet) As Long
     Dim f As Range
-"    Set f = ws.Cells.Find(What:=""*"", After:=ws.Cells(1, 1), LookIn:=xlFormulas, LookAt:=xlPart, _"
+    Set f = ws.Cells.Find(What:="*", After:=ws.Cells(1, 1), LookIn:=xlFormulas, LookAt:=xlPart, _
                           SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
     If f Is Nothing Then LastUsedRow = 0 Else LastUsedRow = f.Row
 End Function
@@ -126,8 +66,6 @@ End Function
 ' ==============================================================================
 ' COLLECTION OF THE SOURCE FILES INTO ONE WORKBOOK (fonts + dynamic tables)
 ' ==============================================================================
-' Checks the Windows font registry (HKLM + HKCU). If the check itself cannot run,
-' returns True (keeps the requested font instead of forcing the fallback).
 Private Function FontExists(ByVal FontName As String) As Boolean
     Const HKCU As Long = &H80000001
     Const HKLM As Long = &H80000002
@@ -136,26 +74,25 @@ Private Function FontExists(ByVal FontName As String) As Boolean
     Dim i As Long, p As Long, nm As String, enumOK As Boolean
 
     On Error GoTo Fallback
-"    Set reg = GetObject(""winmgmts:{impersonationLevel=impersonate}!\\.\root\default:StdRegProv"")"
+    Set reg = GetObject("winmgmts:{impersonationLevel=impersonate}!\\.\root\default:StdRegProv")
 
     For Each hv In Array(HKLM, HKCU)
         names = Empty
-"        If reg.EnumValues(CLng(hv), ""SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts"", names, types) = 0 Then"
+        If reg.EnumValues(CLng(hv), "SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts", names, types) = 0 Then
             enumOK = True
             If IsArray(names) Then
                 For i = LBound(names) To UBound(names)
                     nm = CStr(names(i))
-"                    p = InStr(nm, "" ("")"
-"                    If p > 0 Then nm = Left(nm, p - 1)          ' strip ""(TrueType)"" / ""(OpenType)"""
-"                    ' exact name, or family name of a variable font (e.g. ""Bahnschrift"" for ""Bahnschrift SemiBold"")"
+                    p = InStr(nm, " (")
+                    If p > 0 Then nm = Left(nm, p - 1)
                     If StrComp(nm, FontName, vbTextCompare) = 0 Then FontExists = True: Exit Function
-"                    If StrComp(Left(FontName, Len(nm) + 1), nm & "" "", vbTextCompare) = 0 Then FontExists = True: Exit Function"
+                    If StrComp(Left(FontName, Len(nm) + 1), nm & " ", vbTextCompare) = 0 Then FontExists = True: Exit Function
                 Next i
             End If
         End If
     Next hv
 
-"    FontExists = Not enumOK     ' enumeration worked and nothing matched -> False; enumeration failed -> True"
+    FontExists = Not enumOK
     Exit Function
 Fallback:
     FontExists = True
@@ -179,39 +116,39 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
     Dim h As Long, headerText As String, genCounter As Long
 
     SrcProcessFile = False
-"    ReasonOut = """""
+    ReasonOut = ""
     On Error GoTo EH
 
     On Error Resume Next
     Set wbSource = Workbooks.Open(fileName:=SourcePath & fileName, UpdateLinks:=False, _
-"                                  ReadOnly:=True, AddToMRU:=False, Password:="""")"
+                                  ReadOnly:=True, AddToMRU:=False, Password:="")
     errNum = Err.Number: errDesc = Err.Description: Err.Clear
     On Error GoTo EH
 
     If wbSource Is Nothing Or errNum <> 0 Then
-"        ReasonOut = ""OPEN_FAILED | "" & errDesc: Exit Function"
+        ReasonOut = "OPEN_FAILED | " & errDesc: Exit Function
     End If
 
     If wbSource.Sheets.Count = 0 Then
-"        ReasonOut = ""EMPTY_WORKBOOK (no sheets)"": wbSource.Close SaveChanges:=False: Exit Function"
+        ReasonOut = "EMPTY_WORKBOOK (no sheets)": wbSource.Close SaveChanges:=False: Exit Function
     End If
 
     Set wsSource = wbSource.Sheets(1)
 
     On Error Resume Next
     LastCol = wsSource.Cells(DATA_START_ROW, wsSource.Columns.Count).End(xlToLeft).Column
-"    Set lastFind = wsSource.Cells.Find(What:=""*"", LookIn:=xlFormulas, SearchOrder:=xlByRows, _"
+    Set lastFind = wsSource.Cells.Find(What:="*", LookIn:=xlFormulas, SearchOrder:=xlByRows, _
                                        SearchDirection:=xlPrevious)
     If lastFind Is Nothing Then LastRow = 0 Else LastRow = lastFind.Row - TRAILING_ROWS_SKIP
     errNum = Err.Number: errDesc = Err.Description: Err.Clear
     On Error GoTo EH
 
     If errNum <> 0 Then
-"        ReasonOut = ""DETECTION_FAILED | "" & errDesc: wbSource.Close SaveChanges:=False: Exit Function"
+        ReasonOut = "DETECTION_FAILED | " & errDesc: wbSource.Close SaveChanges:=False: Exit Function
     End If
 
     If LastRow < DATA_START_ROW Or LastCol < 1 Then
-"        ReasonOut = ""EMPTY_WORKBOOK (no data at row "" & DATA_START_ROW & "")"""
+        ReasonOut = "EMPTY_WORKBOOK (no data at row " & DATA_START_ROW & ")"
         wbSource.Close SaveChanges:=False: Exit Function
     End If
 
@@ -221,11 +158,11 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
     On Error GoTo EH
 
     If wsResult Is Nothing Then
-"        ReasonOut = ""ADD_SHEET_FAILED | "" & errDesc: wbSource.Close SaveChanges:=False: Exit Function"
+        ReasonOut = "ADD_SHEET_FAILED | " & errDesc: wbSource.Close SaveChanges:=False: Exit Function
     End If
 
     On Error Resume Next
-"    wsResult.Name = Format(SheetNumber, ""00"")"
+    wsResult.Name = Format(SheetNumber, "00")
     Err.Clear
     On Error GoTo EH
 
@@ -238,7 +175,7 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
     On Error GoTo EH
 
     If errNum <> 0 Or Not IsArray(DataArr) Then
-"        ReasonOut = ""DATA_READ_FAILED | "" & errDesc"
+        ReasonOut = "DATA_READ_FAILED | " & errDesc
         wbSource.Close SaveChanges:=False
         wsResult.Delete
         Exit Function
@@ -246,29 +183,29 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
 
     lastDataRow = 1 + UBound(DataArr, 1)     ' header at row 2 + data rows
 
-"    ' ---- Number formats BEFORE writing data (so ""@"" columns store text)"
+    ' ---- Number formats BEFORE writing data (so "@" columns store text)
     With wsResult
-"        .Columns(""B"").NumberFormat = ""@"""
-"        .Columns(""C"").NumberFormat = ""yyyy-mm-dd"""
-"        If LastCol >= 4 Then .Columns(""D"").NumberFormat = ""@"""
-"        If LastCol >= 5 Then .Columns(""E"").NumberFormat = ""@"""
-"        If LastCol >= 6 Then .Range(.Columns(""F""), .Columns(LastCol)).NumberFormat = ""0.00"""
+        .Columns("B").NumberFormat = "@"
+        .Columns("C").NumberFormat = "yyyy-mm-dd"
+        If LastCol >= 4 Then .Columns("D").NumberFormat = "@"
+        If LastCol >= 5 Then .Columns("E").NumberFormat = "@"
+        If LastCol >= 6 Then .Range(.Columns("F"), .Columns(LastCol)).NumberFormat = "0.00"
     End With
 
-"    wsResult.Range(""A2"").Resize(UBound(DataArr, 1), UBound(DataArr, 2)).Value = DataArr"
+    wsResult.Range("A2").Resize(UBound(DataArr, 1), UBound(DataArr, 2)).Value = DataArr
 
     ' ---- Unique, non-empty headers (case-insensitive, like Excel tables)
-"    Set seenHeaders = CreateObject(""Scripting.Dictionary"")"
+    Set seenHeaders = CreateObject("Scripting.Dictionary")
     seenHeaders.CompareMode = vbTextCompare
     genCounter = 0
 
     For h = 1 To LastCol
         headerText = Trim(CStr(wsResult.Cells(2, h).Value))
-"        If headerText = """" Or seenHeaders.Exists(headerText) Then"
+        If headerText = "" Or seenHeaders.Exists(headerText) Then
             genCounter = genCounter + 1
-"            Do While seenHeaders.Exists(""Column"" & genCounter): genCounter = genCounter + 1: Loop"
-"            wsResult.Cells(2, h).Value = ""Column"" & genCounter"
-"            seenHeaders.Add ""Column"" & genCounter, True"
+            Do While seenHeaders.Exists("Column" & genCounter): genCounter = genCounter + 1: Loop
+            wsResult.Cells(2, h).Value = "Column" & genCounter
+            seenHeaders.Add "Column" & genCounter, True
         Else
             seenHeaders.Add headerText, True
         End If
@@ -281,8 +218,8 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
     On Error Resume Next
     Set tbl = wsResult.ListObjects.Add(xlSrcRange, tblRange, , xlYes)
     If Err.Number = 0 Then
-"        tbl.Name = ""Data"" & Format(SheetNumber, ""00"")"
-"        tbl.TableStyle = """""
+        tbl.Name = "Data" & Format(SheetNumber, "00")
+        tbl.TableStyle = ""
         tbl.ShowTableStyleColumnStripes = False
         tbl.ShowTableStyleRowStripes = False
         tbl.ShowTableStyleFirstColumn = False
@@ -294,12 +231,12 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
 
     ' ---- Formatting
     With wsResult
-"        .Columns(""B"").Font.Name = g_ActiveArabicFont: .Columns(""B"").Font.Size = FONT_SIZE"
-"        .Columns(""C"").Font.Name = g_ActiveNumericFont: .Columns(""C"").Font.Size = FONT_SIZE"
-"        If LastCol >= 4 Then .Columns(""D"").Font.Name = g_ActiveArabicFont: .Columns(""D"").Font.Size = FONT_SIZE"
-"        If LastCol >= 5 Then .Columns(""E"").Font.Name = g_ActiveArabicFont: .Columns(""E"").Font.Size = FONT_SIZE"
+        .Columns("B").Font.Name = g_ActiveArabicFont: .Columns("B").Font.Size = FONT_SIZE
+        .Columns("C").Font.Name = g_ActiveNumericFont: .Columns("C").Font.Size = FONT_SIZE
+        If LastCol >= 4 Then .Columns("D").Font.Name = g_ActiveArabicFont: .Columns("D").Font.Size = FONT_SIZE
+        If LastCol >= 5 Then .Columns("E").Font.Name = g_ActiveArabicFont: .Columns("E").Font.Size = FONT_SIZE
         If LastCol >= 6 Then
-"            With .Range(.Columns(""F""), .Columns(LastCol))"
+            With .Range(.Columns("F"), .Columns(LastCol))
                 .Font.Name = g_ActiveNumericFont
                 .Font.Size = FONT_SIZE
             End With
@@ -314,7 +251,6 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
             .VerticalAlignment = xlCenter
         End With
 
-        ' Identity columns: AutoFit. Score columns: fixed width, rotated bold headers.
         idLastCol = IDENTITY_LAST_COL
         If LastCol < idLastCol Then idLastCol = LastCol
         .Range(.Columns(1), .Columns(idLastCol)).EntireColumn.AutoFit
@@ -329,14 +265,13 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
 
     ' Keep the identity lines (A1:A4 of the source) for the Data sheet of the new files
     On Error Resume Next
-"    wsResult.Range(""A1"").Value = CleanText(CStr(wsSource.Range(""A1"").Value)) & ""|"" & _"
-"                                 CleanText(CStr(wsSource.Range(""A2"").Value)) & ""|"" & _"
-"                                 CleanText(CStr(wsSource.Range(""A3"").Value)) & ""|"" & _"
-"                                 CleanText(CStr(wsSource.Range(""A4"").Value))"
+    wsResult.Range("A1").Value = CleanText(CStr(wsSource.Range("A1").Value)) & "|" & _
+                                 CleanText(CStr(wsSource.Range("A2").Value)) & "|" & _
+                                 CleanText(CStr(wsSource.Range("A3").Value)) & "|" & _
+                                 CleanText(CStr(wsSource.Range("A4").Value))
     Err.Clear
     On Error GoTo EH
 
-    ' Apply title formatting last so table column fonts do not override it.
     PlaceHeaderTitle wsSource, wsResult
 
     On Error Resume Next
@@ -349,7 +284,7 @@ Private Function SrcProcessFile(ByRef wbResult As Workbook, _
     Exit Function
 
 EH:
-"    ReasonOut = ""UNEXPECTED | "" & Err.Number & "" : "" & Err.Description"
+    ReasonOut = "UNEXPECTED | " & Err.Number & " : " & Err.Description
     Err.Clear
     On Error Resume Next
     If Not wbSource Is Nothing Then wbSource.Close SaveChanges:=False
@@ -367,69 +302,51 @@ Private Sub SrcCollectAll(ByRef wbResult As Workbook, _
     Dim names As Collection, sorted As Variant, i As Long
     Dim f As String, ext As String, baseName As String, dotPos As Long
 
-"    CopiedCount = 0: SkippedCount = 0: SheetNumber = 1: SkippedList = """""
+    CopiedCount = 0: SkippedCount = 0: SheetNumber = 1: SkippedList = ""
 
-    ' Collect names first (Dir cannot be nested with other Dir calls)
     Set names = New Collection
-"    fileName = Dir(SourcePath & ""*.xls*"")"
-"    Do While fileName <> """""
-"        If Left(fileName, 2) <> ""~$"" Then"
-"            dotPos = InStrRev(fileName, ""."")"
+    fileName = Dir(SourcePath & "*.xls*")
+    Do While fileName <> ""
+        If Left(fileName, 2) <> "~$" Then
+            dotPos = InStrRev(fileName, ".")
             ext = LCase(Mid(fileName, dotPos + 1))
-"            If ext = ""xls"" Or ext = ""xlsx"" Or ext = ""xlsm"" Or ext = ""xlsb"" Then names.Add fileName"
+            If ext = "xls" Or ext = "xlsx" Or ext = "xlsm" Or ext = "xlsb" Then names.Add fileName
         End If
         fileName = Dir
     Loop
 
     If names.Count = 0 Then
-"        SkippedList = ""  - "" & SOURCE_FOLDER_NAME & "" folder is empty or contains no Excel files:"" & vbCrLf & _"
-"                      ""    "" & SourcePath & vbCrLf"
+        SkippedList = "  - " & SOURCE_FOLDER_NAME & " folder is empty or contains no Excel files:" & vbCrLf & _
+                      "    " & SourcePath & vbCrLf
         Exit Sub
     End If
 
-    sorted = SortedNames(names)     ' deterministic sheet order (01, 02, ...)
+    sorted = SortedNames(names)
     SetupFonts
 
     For i = LBound(sorted) To UBound(sorted)
         f = CStr(sorted(i))
-"        dotPos = InStrRev(f, ""."")"
+        dotPos = InStrRev(f, ".")
         ext = LCase(Mid(f, dotPos + 1))
         baseName = Left(f, dotPos - 1)
 
         If StrComp(SourcePath & f, ThisWorkbook.FullName, vbTextCompare) = 0 Then
             ' skip the macro workbook itself
-        ElseIf IsOpenInExcel(SourcePath & f) Then
-            ' never touch (or close) a file the user already has open
+        ElseIf IsOpenWb(SourcePath & f) Then
             SkippedCount = SkippedCount + 1
-"            SkippedList = SkippedList & ""  - "" & f & "" : ALREADY OPEN in Excel (close it and run again)"" & vbCrLf"
-"        ElseIf ext <> ""xlsx"" And FileExistsPath(SourcePath & baseName & "".xlsx"") Then"
+            SkippedList = SkippedList & "  - " & f & " : ALREADY OPEN in Excel (close it and run again)" & vbCrLf
+        ElseIf ext <> "xlsx" And FileExistsP(SourcePath & baseName & ".xlsx") Then
             SkippedCount = SkippedCount + 1
-"            SkippedList = SkippedList & ""  - "" & f & "" : DUPLICATE (.xlsx version exists)"" & vbCrLf"
+            SkippedList = SkippedList & "  - " & f & " : DUPLICATE (.xlsx version exists)" & vbCrLf
         ElseIf SrcProcessFile(wbResult, SourcePath, f, SheetNumber, Reason) Then
             CopiedCount = CopiedCount + 1: SheetNumber = SheetNumber + 1
         Else
             SkippedCount = SkippedCount + 1
-"            SkippedList = SkippedList & ""  - "" & f & "" : "" & Reason & vbCrLf"
+            SkippedList = SkippedList & "  - " & f & " : " & Reason & vbCrLf
         End If
     Next i
 End Sub
-Private Function IsOpenInExcel(ByVal fullPath As String) As Boolean
-    Dim wb As Workbook
-    For Each wb In Application.Workbooks
-        If StrComp(wb.FullName, fullPath, vbTextCompare) = 0 Then
-            IsOpenInExcel = True
-            Exit Function
-        End If
-    Next wb
-End Function
 
-' ==============================================================================
-' SHARED ENGINE: builds the collected workbook from \Source03\ IN MEMORY.
-' Returns True with wbOut OPEN and UNSAVED (the caller must close it with
-"' SaveChanges:=False, or save it). Returns False when nothing usable was found;"
-' the reasons are in skippedList. The source files are only read, never changed.
-' Calculation mode is not touched. AutomationSecurity / DisplayAlerts are restored.
-' ==============================================================================
 Private Function SrcBuildWorkbook(ByVal srcFolder As String, _
                                   ByRef wbOut As Workbook, _
                                   ByRef copied As Long, _
@@ -439,22 +356,22 @@ Private Function SrcBuildWorkbook(ByVal srcFolder As String, _
 
     SrcBuildWorkbook = False
     Set wbOut = Nothing
-"    copied = 0: skipped = 0: skippedList = """""
+    copied = 0: skipped = 0: skippedList = ""
 
-"    If LCase(Left(srcFolder, 4)) = ""http"" Then"
-"        skippedList = ""  - The workbook is on OneDrive/SharePoint (URL path). Move it to a local folder first."" & vbCrLf"
+    If LCase(Left(srcFolder, 4)) = "http" Then
+        skippedList = "  - The workbook is on OneDrive/SharePoint (URL path). Move it to a local folder first." & vbCrLf
         Exit Function
     End If
-"    If Right(srcFolder, 1) <> ""\"" Then srcFolder = srcFolder & ""\"""
-"    If Dir(srcFolder, vbDirectory) = """" Then"
-"        skippedList = ""  - "" & SOURCE_FOLDER_NAME & "" folder not found: "" & srcFolder & vbCrLf"
+    If Right(srcFolder, 1) <> "\" Then srcFolder = srcFolder & "\"
+    If Not FolderExistsP(srcFolder) Then
+        skippedList = "  - " & SOURCE_FOLDER_NAME & " folder not found: " & srcFolder & vbCrLf
         Exit Function
     End If
 
     oldSec = Application.AutomationSecurity
     oldAlerts = Application.DisplayAlerts
     Application.DisplayAlerts = False
-    Application.AutomationSecurity = msoAutomationSecurityForceDisable   ' block Auto_Open in .xlsm/.xls
+    Application.AutomationSecurity = msoAutomationSecurityForceDisable
     On Error GoTo EH
 
     Set wb = Workbooks.Add
@@ -464,7 +381,7 @@ Private Function SrcBuildWorkbook(ByVal srcFolder As String, _
 
     If copied > 0 Then
         If wb.Sheets.Count > 1 Then
-"            If Left(wb.Sheets(1).Name, 5) = ""Sheet"" And wb.Sheets(1).UsedRange.Cells.Count = 1 Then wb.Sheets(1).Delete"
+            If Left(wb.Sheets(1).Name, 5) = "Sheet" And wb.Sheets(1).UsedRange.Cells.Count = 1 Then wb.Sheets(1).Delete
         End If
         Set wbOut = wb
         SrcBuildWorkbook = True
@@ -478,7 +395,7 @@ Done:
     Exit Function
 
 EH:
-"    skippedList = skippedList & ""  - Build failed: "" & Err.Number & "" : "" & Err.Description & vbCrLf"
+    skippedList = skippedList & "  - Build failed: " & Err.Number & " : " & Err.Description & vbCrLf
     On Error Resume Next
     If Not wb Is Nothing Then wb.Close SaveChanges:=False
     Set wbOut = Nothing
@@ -491,38 +408,21 @@ Private Sub PlaceHeaderTitle(ByVal wsSource As Worksheet, ByVal wsTarget As Work
     Dim partTitle As String
     Dim partGroup As String
 
-    ' 1. Capture and clean the text from A5
-"    rawText = CleanText(CStr(wsSource.Range(""A5"").Value))"
-
-    ' 2. Split at the end of the school year
+    rawText = CleanText(CStr(wsSource.Range("A5").Value))
     SplitAtSchoolYear rawText, partTitle, partGroup
-
-    ' 3. Write and format both merged ranges
-"    WriteMergedCell wsTarget.Range(""B1:F1""), partTitle"
-"    WriteMergedCell wsTarget.Range(""H1:Q1""), partGroup"
-
-    ' Merged cells do not auto-fit, so set the row height explicitly
+    WriteMergedCell wsTarget.Range("B1:F1"), partTitle
+    WriteMergedCell wsTarget.Range("H1:Q1"), partGroup
     wsTarget.Rows(1).RowHeight = HEADER_ROW_HEIGHT
 End Sub
 
-'----------------------------------------------------------
-' Cleans text: line breaks, non-breaking spaces, control
-' characters and repeated spaces.
-'----------------------------------------------------------
 Private Function CleanText(ByVal s As String) As String
-"    s = Replace(s, vbCr, "" "")"
-"    s = Replace(s, vbLf, "" "")"
-"    s = Replace(s, Chr(160), "" "")                       ' non-breaking space"
-    s = Application.WorksheetFunction.Clean(s)          ' control characters
-    CleanText = Application.WorksheetFunction.Trim(s)   ' extra spaces
+    s = Replace(s, vbCr, " ")
+    s = Replace(s, vbLf, " ")
+    s = Replace(s, Chr(160), " ")
+    s = Application.WorksheetFunction.Clean(s)
+    CleanText = Application.WorksheetFunction.Trim(s)
 End Function
 
-'----------------------------------------------------------
-' Splits text into:
-'   part1 = everything up to the end of the school year
-'   part2 = the remainder (class / group name)
-"' If no year is found, part1 = full text and part2 = """"."
-'----------------------------------------------------------
 Private Sub SplitAtSchoolYear(ByVal txt As String, _
                               ByRef part1 As String, _
                               ByRef part2 As String)
@@ -533,24 +433,20 @@ Private Sub SplitAtSchoolYear(ByVal txt As String, _
     Dim seps As String
 
     part1 = txt
-"    part2 = """""
+    part2 = ""
     If Len(txt) = 0 Then Exit Sub
 
-    ' Western (0-9) and Arabic-Indic (U+0660-U+0669) digits
-"    digit = ""[0-9\u0660-\u0669]"""
-    ' Separators: slash, backslash, hyphen, en dash, em dash
-"    seps = ""[/\\\-\u2013\u2014]"""
+    digit = "[0-9\u0660-\u0669]"
+    seps = "[/\\\-\u2013\u2014]"
 
-"    Set rx = CreateObject(""VBScript.RegExp"")"
+    Set rx = CreateObject("VBScript.RegExp")
     rx.Global = False
     rx.IgnoreCase = True
 
-    ' First choice: full school-year pattern (e.g. 2025-2026)
-"    rx.Pattern = digit & ""{4}\s*"" & seps & ""\s*"" & digit & ""{4}"""
+    rx.Pattern = digit & "{4}\s*" & seps & "\s*" & digit & "{4}"
 
     If Not rx.Test(txt) Then
-        ' Fallback: a single 4-digit year
-"        rx.Pattern = digit & ""{4}"""
+        rx.Pattern = digit & "{4}"
         If Not rx.Test(txt) Then Exit Sub
     End If
 
@@ -562,36 +458,29 @@ Private Sub SplitAtSchoolYear(ByVal txt As String, _
     If splitPos < Len(txt) Then
         part2 = Trim(Mid(txt, splitPos + 1))
 
-        ' Remove any separator left at the start of the group name
         Do While Len(part2) > 0
-"            If InStr(1, ""-:/"" & ChrW(&H2013) & ChrW(&H2014), Left(part2, 1)) = 0 Then Exit Do"
+            If InStr(1, "-:/" & ChrW(&H2013) & ChrW(&H2014), Left(part2, 1)) = 0 Then Exit Do
             part2 = Trim(Mid(part2, 2))
         Loop
     End If
 End Sub
 
-'----------------------------------------------------------
-' Merges the range, writes the text and applies formatting.
-'----------------------------------------------------------
 Private Sub WriteMergedCell(ByVal rng As Range, ByVal txt As String)
     With rng
-        .UnMerge                                ' remove any previous merge
-        .ClearContents                          ' clear leftovers
-        .Merge                                  ' merge the range
+        .UnMerge
+        .ClearContents
+        .Merge
         .Value = txt
         .HorizontalAlignment = xlCenter
         .VerticalAlignment = xlCenter
         .WrapText = True
-        .ReadingOrder = xlRTL                   ' right-to-left reading order
+        .ReadingOrder = xlRTL
         .Font.Name = GetAvailableFont(PREFERRED_FONT, FALLBACK_FONT)
         .Font.Size = HEADER_FONT_SIZE
         .Font.Bold = True
     End With
 End Sub
 
-'----------------------------------------------------------
-' Returns the preferred font if installed, otherwise the fallback.
-'----------------------------------------------------------
 Private Function GetAvailableFont(ByVal wanted As String, _
                                   ByVal fallback As String) As String
     If IsFontInstalled(wanted) Then
@@ -601,20 +490,16 @@ Private Function GetAvailableFont(ByVal wanted As String, _
     End If
 End Function
 
-'----------------------------------------------------------
-' Checks the system and per-user font folders for a file whose
-' name starts with the font name (e.g. Cairo-Regular.ttf).
-'----------------------------------------------------------
 Private Function IsFontInstalled(ByVal fontName As String) As Boolean
     Dim folders(1 To 2) As String
     Dim i As Long
 
-"    folders(1) = Environ(""WINDIR"") & ""\Fonts\"""
-"    folders(2) = Environ(""LOCALAPPDATA"") & ""\Microsoft\Windows\Fonts\"""
+    folders(1) = Environ("WINDIR") & "\Fonts\"
+    folders(2) = Environ("LOCALAPPDATA") & "\Microsoft\Windows\Fonts\"
 
     On Error Resume Next
     For i = 1 To 2
-"        If Len(Dir(folders(i) & fontName & ""*.*"")) > 0 Then"
+        If Len(Dir(folders(i) & fontName & "*.*")) > 0 Then
             IsFontInstalled = True
             Exit Function
         End If
@@ -623,29 +508,26 @@ Private Function IsFontInstalled(ByVal fontName As String) As Boolean
 End Function
 
 ' ==============================================================================
-' PUBLIC API (modBiuldAnalysisfilesData03)
+' PUBLIC API (modAnalysisBuilderData03)
 ' ==============================================================================
-
-' Builds the collected workbook in memory from \Source03\ and indexes its sheets by H1.
-' wbGlobal stays OPEN and unsaved: the caller closes it with SaveChanges:=False.
 Public Function LoadSource(ByRef wbGlobal As Workbook, ByRef sheetIndex As Object, _
                            ByRef dupKeys As Object, ByRef report As String) As Boolean
     Dim srcFolder As String, copied As Long, skipped As Long, lst As String
     Dim ws As Worksheet, k As String
 
     LoadSource = False
-"    report = """""
+    report = ""
 
     If Len(ThisWorkbook.Path) = 0 Then
-"        report = ""  - Save the tool workbook first (its folder is needed to find "" & SOURCE_FOLDER_NAME & "")."" & vbCrLf"
+        report = "  - Save the tool workbook first (its folder is needed to find " & SOURCE_FOLDER_NAME & ")." & vbCrLf
         Exit Function
     End If
-"    If Not FolderExistsPath(ThisWorkbook.Path & ""\"" & SOURCE_FOLDER_NAME) Then"
-"        report = ""  - "" & SOURCE_FOLDER_NAME & "" folder not found next to the tool."" & vbCrLf"
+    If Not FolderExistsP(ThisWorkbook.Path & "\" & SOURCE_FOLDER_NAME) Then
+        report = "  - " & SOURCE_FOLDER_NAME & " folder not found next to the tool." & vbCrLf
         Exit Function
     End If
 
-"    srcFolder = ThisWorkbook.Path & ""\"" & SOURCE_FOLDER_NAME & ""\"""
+    srcFolder = ThisWorkbook.Path & "\" & SOURCE_FOLDER_NAME & "\"
     Set wbGlobal = Nothing
     If Not SrcBuildWorkbook(srcFolder, wbGlobal, copied, skipped, lst) Then
         report = lst
@@ -653,14 +535,14 @@ Public Function LoadSource(ByRef wbGlobal As Workbook, ByRef sheetIndex As Objec
     End If
     report = lst
 
-"    Set sheetIndex = CreateObject(""Scripting.Dictionary"")"
+    Set sheetIndex = CreateObject("Scripting.Dictionary")
     sheetIndex.CompareMode = vbTextCompare
-"    Set dupKeys = CreateObject(""Scripting.Dictionary"")"
+    Set dupKeys = CreateObject("Scripting.Dictionary")
     dupKeys.CompareMode = vbTextCompare
 
     For Each ws In wbGlobal.Worksheets
-"        k = NormalizeKey(CellText(ws.Range(""H1"")))"
-"        If k <> """" Then"
+        k = NormKey(CellText(ws.Range("H1")))
+        If k <> "" Then
             If sheetIndex.Exists(k) Then
                 If Not dupKeys.Exists(k) Then dupKeys.Add k, True
             Else
@@ -672,23 +554,21 @@ Public Function LoadSource(ByRef wbGlobal As Workbook, ByRef sheetIndex As Objec
     LoadSource = True
 End Function
 
-' stem -> array of section titles (the H1 text of each source sheet that feeds the file).
-' 12 files from 17 source sheets (updated for Version 03).
 Public Function GetFileMap() As Object
     Dim m As Object
-"    Set m = CreateObject(""Scripting.Dictionary"")"
-"    AddGroup m, ""1LitAnalysis03"", AR(""623 648 644 649 20 62B 627 646 648 64A 20 62C 62F 639 20 645 634 62A 631 643 20 622 62F 627 628""), 1"
-"    AddGroup m, ""1TecnoGlobalAnalysis03"", AR(""623 648 644 649 20 62B 627 646 648 64A 20 62C 62F 639 20 645 634 62A 631 643 20 639 644 648 645 20 648 62A 643 646 648 644 648 62C 64A 627""), 4"
-"    AddGroup m, ""2GEAnalysis03"", AR(""62B 627 646 64A 629 20 62B 627 646 648 64A 20 62A 633 64A 64A 631 20 648 627 642 62A 635 627 62F""), 1"
-"    AddGroup m, ""2LEAnalysis03"", AR(""62B 627 646 64A 629 20 62B 627 646 648 64A 20 644 63A 627 62A 20 623 62C 646 628 64A 629 20 623 644 645 627 646 64A 629""), 1"
-"    AddGroup m, ""2MathAnalysis03"", AR(""62B 627 646 64A 629 20 62B 627 646 648 64A 20 631 64A 627 636 64A 627 62A""), 1"
-"    AddGroup m, ""2PhiloAnalysis03"", AR(""62B 627 646 64A 629 20 62B 627 646 648 64A 20 622 62F 627 628 20 648 641 644 633 641 629""), 1"
-"    AddGroup m, ""2SEGlobalAnalysis03"", AR(""62B 627 646 64A 629 20 62B 627 646 648 64A 20 639 644 648 645 20 62A 62C 631 64A 628 64A 629""), 2"
-"    AddGroup m, ""3GEAnalysis03"", AR(""62B 627 644 62B 629 20 62B 627 646 648 64A 20 62A 633 64A 64A 631 20 648 627 642 62A 635 627 62F""), 1"
-"    AddGroup m, ""3LEAnalysis03"", AR(""62B 627 644 62B 629 20 62B 627 646 648 64A 20 644 63A 627 62A 20 623 62C 646 628 64A 629 20 623 644 645 627 646 64A 629""), 1"
-"    AddGroup m, ""3MathAnalysis03"", AR(""62B 627 644 62B 629 20 62B 627 646 648 64A 20 631 64A 627 636 64A 627 62A""), 1"
-"    AddGroup m, ""3PhiloAnalysis03"", AR(""62B 627 644 62B 629 20 62B 627 646 648 64A 20 622 62F 627 628 20 648 641 644 633 641 629""), 1"
-"    AddGroup m, ""3SEGlobalAnalysis03"", AR(""62B 627 644 62B 629 20 62B 627 646 648 64A 20 639 644 648 645 20 62A 62C 631 64A 628 64A 629""), 2"
+    Set m = CreateObject("Scripting.Dictionary")
+    AddGroup m, "1LitAnalysis03", ArT("623 648 644 649 20 62B 627 646 648 64A 20 62C 62F 639 20 645 634 62A 631 643 20 622 62F 627 628"), 1
+    AddGroup m, "1TecnoGlobalAnalysis03", ArT("623 648 644 649 20 62B 627 646 648 64A 20 62C 62F 639 20 645 634 62A 631 643 20 639 644 648 645 20 648 62A 643 646 648 644 648 62C 64A 627"), 4
+    AddGroup m, "2GEAnalysis03", ArT("62B 627 646 64A 629 20 62B 627 646 648 64A 20 62A 633 64A 64A 631 20 648 627 642 62A 635 627 62F"), 1
+    AddGroup m, "2LEAnalysis03", ArT("62B 627 646 64A 629 20 62B 627 646 648 64A 20 644 63A 627 62A 20 623 62C 646 628 64A 629 20 623 644 645 627 646 64A 629"), 1
+    AddGroup m, "2MathAnalysis03", ArT("62B 627 646 64A 629 20 62B 627 646 648 64A 20 631 64A 627 636 64A 627 62A"), 1
+    AddGroup m, "2PhiloAnalysis03", ArT("62B 627 646 64A 629 20 62B 627 646 648 64A 20 622 62F 627 628 20 648 641 644 633 641 629"), 1
+    AddGroup m, "2SEGlobalAnalysis03", ArT("62B 627 646 64A 629 20 62B 627 646 648 64A 20 639 644 648 645 20 62A 62C 631 64A 628 64A 629"), 2
+    AddGroup m, "3GEAnalysis03", ArT("62B 627 644 62B 629 20 62B 627 646 648 64A 20 62A 633 64A 64A 631 20 648 627 642 62A 635 627 62F"), 1
+    AddGroup m, "3LEAnalysis03", ArT("62B 627 644 62B 629 20 62B 627 646 648 64A 20 644 63A 627 62A 20 623 62C 646 628 64A 629 20 623 644 645 627 646 64A 629"), 1
+    AddGroup m, "3MathAnalysis03", ArT("62B 627 644 62B 629 20 62B 627 646 648 64A 20 631 64A 627 636 64A 627 62A"), 1
+    AddGroup m, "3PhiloAnalysis03", ArT("62B 627 644 62B 629 20 62B 627 646 648 64A 20 622 62F 627 628 20 648 641 644 633 641 629"), 1
+    AddGroup m, "3SEGlobalAnalysis03", ArT("62B 627 644 62B 629 20 62B 627 646 648 64A 20 639 644 648 645 20 62A 62C 631 64A 628 64A 629"), 2
     Set GetFileMap = m
 End Function
 
@@ -696,50 +576,42 @@ Private Sub AddGroup(ByVal m As Object, ByVal stem As String, ByVal prefix As St
     Dim a() As String, i As Long
     ReDim a(0 To cnt - 1)
     For i = 1 To cnt
-"        a(i - 1) = prefix & "" "" & Format$(i, ""00"")"
+        a(i - 1) = prefix & " " & Format$(i, "00")
     Next i
     m.Add stem, a
 End Sub
 
-' True when every section of the group exists once and has data
 Public Function GroupReady(ByVal sheetIndex As Object, ByVal dupKeys As Object, _
                            ByVal titles As Variant, ByRef why As String) As Boolean
     Dim i As Long, k As String, ok As Boolean, wsT As Worksheet
     ok = True
-"    why = """""
+    why = ""
     For i = LBound(titles) To UBound(titles)
-        k = NormalizeKey(CStr(titles(i)))
+        k = NormKey(CStr(titles(i)))
         If Not sheetIndex.Exists(k) Then
-"            ok = False: why = why & ""    missing section: "" & k & vbCrLf"
+            ok = False: why = why & "    missing section: " & k & vbCrLf
         ElseIf dupKeys.Exists(k) Then
-"            ok = False: why = why & ""    duplicate section: "" & k & vbCrLf"
+            ok = False: why = why & "    duplicate section: " & k & vbCrLf
         Else
             Set wsT = sheetIndex(k)
             If LastUsedRow(wsT) < 3 Then
-"                ok = False: why = why & ""    empty section: "" & k & vbCrLf"
+                ok = False: why = why & "    empty section: " & k & vbCrLf
             End If
         End If
     Next i
     GroupReady = ok
 End Function
 
-"' ""<class title> 01""  ->  ""<class title>"""
 Private Function ClassTitleOf(ByVal key As String) As String
-    key = NormalizeKey(key)
+    key = NormKey(key)
     If Len(key) > 3 Then
-"        If Mid$(key, Len(key) - 2, 1) = "" "" And IsNumeric(Right$(key, 2)) Then key = Left$(key, Len(key) - 3)"
+        If Mid$(key, Len(key) - 2, 1) = " " And IsNumeric(Right$(key, 2)) Then key = Left$(key, Len(key) - 3)
     End If
     ClassTitleOf = key
 End Function
 
 ' ==============================================================================
 ' DATA SHEET BUILDER (Original 3-Terms Data)
-'   Row 1-4 : identity lines taken from the source file (A1:A4)
-'   Row 5   : class title
-'   Row 6   : headers (source headers unchanged) + extra columns
-'   Row 7.. : all sections one after the other (the section number goes in the section column)
-'   Extra columns : section | annual average of the three terms (formula) |
-'                   transition/acceptance average (manual) | picture (manual) | notes (manual)
 ' ==============================================================================
 Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Object, _
                                ByVal titles As Variant, ByVal acceptHdr As String, _
@@ -756,7 +628,7 @@ Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Obje
     Dim mk As String, secStart As Long
 
     BuildDataSheet = False
-"    errText = """""
+    errText = ""
     On Error GoTo EH
 
     nSec = UBound(titles) - LBound(titles) + 1
@@ -765,26 +637,26 @@ Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Obje
 
     ' ---- pass 1: validate sections, count rows
     For i = 1 To nSec
-        key = NormalizeKey(CStr(titles(LBound(titles) + i - 1)))
+        key = NormKey(CStr(titles(LBound(titles) + i - 1)))
         Set wsSrc = sheetIndex(key)
         lastCol = wsSrc.Cells(2, wsSrc.Columns.Count).End(xlToLeft).Column
         lastRow = LastUsedRow(wsSrc)
         rowsOf(i) = lastRow - 2
-"        If rowsOf(i) < 1 Then Err.Raise vbObjectError + 801, ""BuildDataSheet"", ""Empty section: "" & key"
+        If rowsOf(i) < 1 Then Err.Raise vbObjectError + 801, "BuildDataSheet", "Empty section: " & key
         If i = 1 Then
             Set wsFirst = wsSrc
             W = lastCol
-"            If W < 7 Then Err.Raise vbObjectError + 804, ""BuildDataSheet"", ""Too few columns in: "" & key"
+            If W < 7 Then Err.Raise vbObjectError + 804, "BuildDataSheet", "Too few columns in: " & key
             ReDim hdrBase(1 To W)
             For c = 1 To W
-                hdrBase(c) = NormalizeKey(CellText(wsSrc.Cells(2, c)))
+                hdrBase(c) = NormKey(CellText(wsSrc.Cells(2, c)))
             Next c
             classTitle = ClassTitleOf(key)
         Else
-"            If lastCol <> W Then Err.Raise vbObjectError + 802, ""BuildDataSheet"", ""Column count differs in: "" & key"
+            If lastCol <> W Then Err.Raise vbObjectError + 802, "BuildDataSheet", "Column count differs in: " & key
             For c = 1 To W
-                If StrComp(NormalizeKey(CellText(wsSrc.Cells(2, c))), hdrBase(c), vbTextCompare) <> 0 Then
-"                    Err.Raise vbObjectError + 803, ""BuildDataSheet"", ""Header differs (column "" & c & "") in: "" & key"
+                If StrComp(NormKey(CellText(wsSrc.Cells(2, c))), hdrBase(c), vbTextCompare) <> 0 Then
+                    Err.Raise vbObjectError + 803, "BuildDataSheet", "Header differs (column " & c & ") in: " & key
                 End If
             Next c
         End If
@@ -795,25 +667,25 @@ Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Obje
     ' ---- headers: unique and non-empty
     lastC = W + 5
     ReDim hdrRow(1 To lastC)
-"    Set seen = CreateObject(""Scripting.Dictionary"")"
+    Set seen = CreateObject("Scripting.Dictionary")
     seen.CompareMode = vbTextCompare
     For c = 1 To W
         h = hdrBase(c)
-"        If h = """" Or seen.Exists(h) Then"
+        If h = "" Or seen.Exists(h) Then
             Do
                 gen = gen + 1
-"                h = ""Column"" & gen"
+                h = "Column" & gen
             Loop While seen.Exists(h)
         End If
         seen.Add h, True
         hdrRow(c) = h
     Next c
 
-"    extras = Array(AR(""627 644 642 633 645""), AnnualAvgHeader(), acceptHdr, AR(""627 644 635 648 631 629""), AR(""627 644 645 644 627 62D 638 627 62A""))"
+    extras = Array(ArT("627 644 642 633 645"), AnnualAvgHeader(), acceptHdr, ArT("627 644 635 648 631 629"), ArT("627 644 645 644 627 62D 638 627 62A"))
     For i = 0 To 4
         nm = CStr(extras(i))
         Do While seen.Exists(nm)
-"            nm = nm & "" 2"""
+            nm = nm & " 2"
         Loop
         seen.Add nm, True
         hdrRow(W + 1 + i) = nm
@@ -823,7 +695,7 @@ Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Obje
     ReDim outArr(1 To total, 1 To W)
     rr = 0
     For i = 1 To nSec
-        key = NormalizeKey(CStr(titles(LBound(titles) + i - 1)))
+        key = NormKey(CStr(titles(LBound(titles) + i - 1)))
         Set wsSrc = sheetIndex(key)
         arr = wsSrc.Range(wsSrc.Cells(3, 1), wsSrc.Cells(2 + rowsOf(i), W)).Value
         For r = 1 To rowsOf(i)
@@ -842,14 +714,13 @@ Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Obje
     lRow = DATA_FIRST_ROW + total - 1
 
     With ws
-"        .Range(.Cells(DATA_HDR_ROW, 1), .Cells(DATA_HDR_ROW, lastC)).NumberFormat = ""@"""
+        .Range(.Cells(DATA_HDR_ROW, 1), .Cells(DATA_HDR_ROW, lastC)).NumberFormat = "@"
         .Range(.Cells(DATA_HDR_ROW, 1), .Cells(DATA_HDR_ROW, lastC)).Value = hdrRow
 
-        ' number formats BEFORE the data so that text columns stay text
         .Range(.Cells(fRow, 1), .Cells(lRow, 1)).NumberFormat = FMT_COUNT
-"        .Range(.Cells(fRow, 2), .Cells(lRow, 2)).NumberFormat = ""@"""
-"        .Range(.Cells(fRow, 3), .Cells(lRow, 3)).NumberFormat = ""yyyy-mm-dd"""
-"        .Range(.Cells(fRow, 4), .Cells(lRow, 5)).NumberFormat = ""@"""
+        .Range(.Cells(fRow, 2), .Cells(lRow, 2)).NumberFormat = "@"
+        .Range(.Cells(fRow, 3), .Cells(lRow, 3)).NumberFormat = "yyyy-mm-dd"
+        .Range(.Cells(fRow, 4), .Cells(lRow, 5)).NumberFormat = "@"
         .Range(.Cells(fRow, 6), .Cells(lRow, W)).NumberFormat = FMT_DEC
         .Range(.Cells(fRow, W + 1), .Cells(lRow, W + 1)).NumberFormat = FMT_COUNT
         .Range(.Cells(fRow, W + 2), .Cells(lRow, W + 3)).NumberFormat = FMT_DEC
@@ -863,10 +734,10 @@ Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Obje
         Next i
     End With
 
-    ' ---- table named Data (no style: the look is applied by the style helpers)
+    ' ---- table named Data
     Set lo = ws.ListObjects.Add(xlSrcRange, ws.Range(ws.Cells(DATA_HDR_ROW, 1), ws.Cells(lRow, lastC)), , xlYes)
     lo.Name = DATA_TABLE
-"    lo.TableStyle = """""
+    lo.TableStyle = ""
     lo.ShowTableStyleRowStripes = False
     lo.ShowTableStyleColumnStripes = False
     lo.ShowTableStyleFirstColumn = False
@@ -874,24 +745,24 @@ Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Obje
     lo.ShowAutoFilter = True
 
     ' ---- annual average of the three terms = AVERAGE over the three term average columns
-"    mk = AR(""645 639 62F 644"")"
+    mk = ArT("645 639 62F 644")
     a1 = 0: a2 = 0: a3 = 0
     For c = 6 To W
-        h = NormalizeKey(CStr(hdrRow(c)))
+        h = NormKey(CStr(hdrRow(c)))
         If Left$(h, 4) = mk Then
-"            If Right$(h, 1) = ""1"" Then a1 = c"
-"            If Right$(h, 1) = ""2"" Then a2 = c"
-"            If Right$(h, 1) = ""3"" Then a3 = c"
+            If Right$(h, 1) = "1" Then a1 = c
+            If Right$(h, 1) = "2" Then a2 = c
+            If Right$(h, 1) = "3" Then a3 = c
         End If
     Next c
     If a1 = 0 Or a2 = 0 Or a3 = 0 Then a1 = W - 2: a2 = W - 1: a3 = W
     ws.Range(ws.Cells(fRow, W + 2), ws.Cells(lRow, W + 2)).Formula = _
-"        ""=IFERROR(AVERAGE("" & ColLetter(a1) & fRow & "","" & ColLetter(a2) & fRow & "","" & ColLetter(a3) & fRow & ""),"" & QT & QT & "")"""
+        "=IFERROR(AVERAGE(" & ColLetter(a1) & fRow & "," & ColLetter(a2) & fRow & "," & ColLetter(a3) & fRow & ")," & QT & QT & ")"
 
     ' ---- identity lines (rows 1-5)
-"    lines = Split(CellText(wsFirst.Range(""A1"")), ""|"")"
+    lines = Split(CellText(wsFirst.Range("A1")), "|")
     For r = 1 To 4
-"        txt = """""
+        txt = ""
         If UBound(lines) >= r - 1 Then txt = Trim$(lines(r - 1))
         MergeText ws, r, 1, W, txt
     Next r
@@ -947,18 +818,12 @@ Public Function BuildDataSheet(ByVal wbNew As Workbook, ByVal sheetIndex As Obje
     BuildDataSheet = True
     Exit Function
 EH:
-"    errText = ""BuildDataSheet: "" & Err.Number & "" : "" & Err.Description"
+    errText = "BuildDataSheet: " & Err.Number & " : " & Err.Description
     Err.Clear
 End Function
 
 ' ==============================================================================
 ' DATA01 SHEET BUILDER (Single Source of Truth for Annual Averages)
-'   Row 1-4 : identity lines copied from Data
-'   Row 5   : class title
-'   Row 6   : headers: A:E (identity) | Subjects (without term suffix) |
-'             المعدل السنوي | القسم
-'   Row 7.. : formulas =AVERAGE(ف1, ف2, ف3) from Data for each subject and
-'             for the general annual average.
 ' ==============================================================================
 Public Function BuildData01Sheet(ByVal wbNew As Workbook, ByRef errText As String) As Boolean
     Dim wsData As Worksheet, ws01 As Worksheet, lo As ListObject
@@ -968,7 +833,7 @@ Public Function BuildData01Sheet(ByVal wbNew As Workbook, ByRef errText As Strin
     Dim c1 As String, c2 As String, c3 As String, fml As String
 
     BuildData01Sheet = False
-"    errText = """""
+    errText = ""
     On Error GoTo EH
 
     If Not DiscoverData(wbNew, errText) Then Exit Function
@@ -997,13 +862,13 @@ Public Function BuildData01Sheet(ByVal wbNew As Workbook, ByRef errText As Strin
     hdrRow(colSec) = gHdr(gSecCol)
 
     With ws01
-"        .Range(.Cells(DATA_HDR_ROW, 1), .Cells(DATA_HDR_ROW, lastC)).NumberFormat = ""@"""
+        .Range(.Cells(DATA_HDR_ROW, 1), .Cells(DATA_HDR_ROW, lastC)).NumberFormat = "@"
         .Range(.Cells(DATA_HDR_ROW, 1), .Cells(DATA_HDR_ROW, lastC)).Value = hdrRow
 
         .Range(.Cells(fRow, 1), .Cells(lRow, 1)).NumberFormat = FMT_COUNT
-"        .Range(.Cells(fRow, 2), .Cells(lRow, 2)).NumberFormat = ""@"""
-"        .Range(.Cells(fRow, 3), .Cells(lRow, 3)).NumberFormat = ""yyyy-mm-dd"""
-"        .Range(.Cells(fRow, 4), .Cells(lRow, 5)).NumberFormat = ""@"""
+        .Range(.Cells(fRow, 2), .Cells(lRow, 2)).NumberFormat = "@"
+        .Range(.Cells(fRow, 3), .Cells(lRow, 3)).NumberFormat = "yyyy-mm-dd"
+        .Range(.Cells(fRow, 4), .Cells(lRow, 5)).NumberFormat = "@"
         .Range(.Cells(fRow, 6), .Cells(lRow, colAvg)).NumberFormat = FMT_DEC
         .Range(.Cells(fRow, colSec), .Cells(lRow, colSec)).NumberFormat = FMT_COUNT
 
@@ -1011,27 +876,27 @@ Public Function BuildData01Sheet(ByVal wbNew As Workbook, ByRef errText As Strin
         .Range(.Cells(fRow, 1), .Cells(lRow, 5)).Value = wsData.Range(wsData.Cells(fRow, 1), wsData.Cells(lRow, 5)).Value
         .Range(.Cells(fRow, colSec), .Cells(lRow, colSec)).Value = wsData.Range(wsData.Cells(fRow, gSecCol), wsData.Cells(lRow, gSecCol)).Value
 
-"        ' Subject annual averages: =IFERROR(AVERAGE(Data!T1, Data!T2, Data!T3), """")"
+        ' Subject annual averages: =IFERROR(AVERAGE(Data!T1, Data!T2, Data!T3), "")
         For k = 1 To n
-"            c1 = DATA_SHEET & ""!"" & ColLetter(gSubjC1(k)) & fRow"
-"            c2 = DATA_SHEET & ""!"" & ColLetter(gSubjC2(k)) & fRow"
-"            c3 = DATA_SHEET & ""!"" & ColLetter(gSubjC3(k)) & fRow"
-"            fml = ""=IFERROR(AVERAGE("" & c1 & "","" & c2 & "","" & c3 & ""),"" & QT & QT & "")"""
+            c1 = DATA_SHEET & "!" & ColLetter(gSubjC1(k)) & fRow
+            c2 = DATA_SHEET & "!" & ColLetter(gSubjC2(k)) & fRow
+            c3 = DATA_SHEET & "!" & ColLetter(gSubjC3(k)) & fRow
+            fml = "=IFERROR(AVERAGE(" & c1 & "," & c2 & "," & c3 & ")," & QT & QT & ")"
             .Range(.Cells(fRow, 5 + k), .Cells(lRow, 5 + k)).Formula = fml
         Next k
 
-"        ' General annual average: =IFERROR(AVERAGE(Data!Avg1, Data!Avg2, Data!Avg3), """")"
-"        c1 = DATA_SHEET & ""!"" & ColLetter(gAvgC1) & fRow"
-"        c2 = DATA_SHEET & ""!"" & ColLetter(gAvgC2) & fRow"
-"        c3 = DATA_SHEET & ""!"" & ColLetter(gAvgC3) & fRow"
-"        fml = ""=IFERROR(AVERAGE("" & c1 & "","" & c2 & "","" & c3 & ""),"" & QT & QT & "")"""
+        ' General annual average: =IFERROR(AVERAGE(Data!Avg1, Data!Avg2, Data!Avg3), "")
+        c1 = DATA_SHEET & "!" & ColLetter(gAvgC1) & fRow
+        c2 = DATA_SHEET & "!" & ColLetter(gAvgC2) & fRow
+        c3 = DATA_SHEET & "!" & ColLetter(gAvgC3) & fRow
+        fml = "=IFERROR(AVERAGE(" & c1 & "," & c2 & "," & c3 & ")," & QT & QT & ")"
         .Range(.Cells(fRow, colAvg), .Cells(lRow, colAvg)).Formula = fml
     End With
 
     ' Create structured table Data01
     Set lo = ws01.ListObjects.Add(xlSrcRange, ws01.Range(ws01.Cells(DATA_HDR_ROW, 1), ws01.Cells(lRow, lastC)), , xlYes)
     lo.Name = DATA01_TABLE
-"    lo.TableStyle = """""
+    lo.TableStyle = ""
     lo.ShowTableStyleRowStripes = False
     lo.ShowTableStyleColumnStripes = False
     lo.ShowTableStyleFirstColumn = False
@@ -1087,6 +952,6 @@ Public Function BuildData01Sheet(ByVal wbNew As Workbook, ByRef errText As Strin
     BuildData01Sheet = True
     Exit Function
 EH:
-"    errText = ""BuildData01Sheet: "" & Err.Number & "" : "" & Err.Description"
+    errText = "BuildData01Sheet: " & Err.Number & " : " & Err.Description
     Err.Clear
 End Function
